@@ -8,7 +8,7 @@
             "preLaunchTask": "build",
             "program": "${workspaceFolder}/src/TechDemo/bin/Debug/net6.0/TechDemo.dll",
             "args": [],
-            "cwd": "${workspaceFolder}/src/TechDemo",
+            "cwd": "${workspaceFolder}/src/TechDemo/bin/Debug/net6.0",
             "console": "internalConsole",
             "stopAtEntry": false
         },
