@@ -8,7 +8,7 @@ namespace AbstractVulkan;
 [SkipLocalsInit]
 public static unsafe class StartupUtilities
 {
-	public static Result CreateInstance<TNext>(this Vk vk, string applicationName, Version32 applicationVersion, string engineName, Version32 engineVersion, Version32 apiVersion, AllocationCallbacks* allocator, IReadOnlyList<string> layers, IReadOnlyList<string> extensions, ref TNext next, out Instance instance) where TNext : unmanaged, IExtendsChain<InstanceCreateInfo>
+	public static Result CreateInstance(this Vk vk, string applicationName, Version32 applicationVersion, string engineName, Version32 engineVersion, Version32 apiVersion, AllocationCallbacks* allocator, IReadOnlyList<string> layers, IReadOnlyList<string> extensions, void* next, out Instance instance)
 	{
 		ApplicationInfo applicationInfo = new()
 		{
@@ -21,18 +21,17 @@ public static unsafe class StartupUtilities
 			PNext = null
 		};
 
-		InstanceCreateInfo instanceCreateInfo = new(){
+		InstanceCreateInfo instanceCreateInfo = new()
+		{
 			SType = StructureType.InstanceCreateInfo,
 			PApplicationInfo = &applicationInfo,
 			Flags = 0, // TBD
 			EnabledLayerCount = (uint)layers.Count,
 			PpEnabledLayerNames = (byte**)SilkMarshal.StringArrayToPtr(layers),
-			EnabledExtensionCount = (uint) extensions.Count,
+			EnabledExtensionCount = (uint)extensions.Count,
 			PpEnabledExtensionNames = (byte**)SilkMarshal.StringArrayToPtr(extensions),
-
+			PNext = next
 		};
-
-		instanceCreateInfo.SetNext(ref next); // TODO
 
 		Result result;
 
@@ -43,5 +42,9 @@ public static unsafe class StartupUtilities
 		SilkMarshal.Free((nint)applicationInfo.PEngineName);
 
 		return result;
+	}
+	public static Result CreateInstance<TNext>(this Vk vk, string applicationName, Version32 applicationVersion, string engineName, Version32 engineVersion, Version32 apiVersion, AllocationCallbacks* allocator, IReadOnlyList<string> layers, IReadOnlyList<string> extensions, ref TNext next, out Instance instance) where TNext : unmanaged, IExtendsChain<InstanceCreateInfo>
+	{
+		return vk.CreateInstance(applicationName, applicationVersion, engineName, engineVersion, apiVersion, allocator, layers, extensions, Unsafe.AsPointer(ref next), out instance);
 	}
 }
