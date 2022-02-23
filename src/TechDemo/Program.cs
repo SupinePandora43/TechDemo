@@ -27,6 +27,8 @@ public static unsafe partial class Program
 			Title = "TechDemo"
 		});
 
+		window.Initialize();
+
 		if (window.VkSurface is null) throw new Exception("window.VkSurface is null");
 
 		vk = Vk.GetApi();
@@ -36,7 +38,6 @@ public static unsafe partial class Program
 			for (uint i = 0; i < count; i++) extensions.Add(Marshal.PtrToStringAnsi((nint)windowExtensions[i])!);
 		}
 
-		// TODO: use EnableValidation
 		DebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCreateInfoEXT = new()
 		{
 			SType = StructureType.DebugUtilsMessengerCreateInfoExt,
@@ -48,7 +49,12 @@ public static unsafe partial class Program
 			PfnUserCallback = (delegate* unmanaged[Cdecl]<DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT, DebugUtilsMessengerCallbackDataEXT*, void*, Bool32>)&DebugCallback
 		};
 
-		C(vk.CreateInstance("TechDemo", new Version32(1, 0, 0), "No Engine", new Version32(0, 0, 0), Vk.Version11, null, new[] { "VK_LAYER_KHRONOS_validation" }, extensions, ref debugUtilsMessengerCreateInfoEXT, out instance));
+		C(EnableValidation ?
+			vk.CreateInstance("TechDemo", new Version32(1, 0, 0), "No Engine", new Version32(0, 0, 0), Vk.Version11, null, new[] { "VK_LAYER_KHRONOS_validation" }, extensions, &debugUtilsMessengerCreateInfoEXT, out instance)
+			: vk.CreateInstance("TechDemo", new Version32(1, 0, 0), "No Engine", new Version32(0, 0, 0), Vk.Version11, null, Array.Empty<string>(), extensions, null, out instance)
+			);
+
+
 	}
 	public static void Main()
 	{
