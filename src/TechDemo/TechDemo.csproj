@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net6.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Shaders Include="./shaders/*.*"/>
+
+		<ProjectReference Include="..\AbstractVulkan\AbstractVulkan.csproj" />
+
+		<!-- TODO: only required ones -->
+		<PackageReference Include="Silk.NET" Version="2.11.0" />
+	</ItemGroup>
+	<Target Name="CompileShaders" Inputs="@(Shaders)" Outputs="./shaders/compiled/**" BeforeTargets="ResolveReferences">
+		<MakeDir Directories="./shaders/compiled" />
+		<Exec Command="glslc -O -g -o ./shaders/compiled/%(Shaders.Filename)%(Shaders.Extension).spv %(Shaders.Identity)" EchoOff="false" />
+		<EmbeddedResource Include="./shaders/compiled/%(Shaders.Filename)%(Shaders.Extension).spv" />
+	</Target>
+
+</Project>
