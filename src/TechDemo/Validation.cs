@@ -25,9 +25,11 @@ unsafe partial class Program
 		return Vk.False;
 	}
 
+	static void Throw() => throw new Exception(Environment.StackTrace);
+	static void Throw(string cause) => throw new Exception(cause);
+
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static void C(Result r){
 		if(r is not Result.Success) Throw();
-		static void Throw() => throw new Exception(Environment.StackTrace);
 	}
 }
