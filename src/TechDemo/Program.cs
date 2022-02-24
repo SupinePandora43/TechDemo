@@ -18,7 +18,7 @@ public static unsafe partial class Program
 
 	private static readonly SurfaceKHR surface;
 	private static readonly PhysicalDevice physicalDevice;
-	private static readonly uint graphicsFamily = uint.MaxValue, computeFamily = uint.MaxValue, presentFamily = uint.MaxValue;
+	private static readonly uint graphicsQueueFamily = uint.MaxValue, computeQueueFamily = uint.MaxValue, presentQueueFamily = uint.MaxValue;
 
 	private static readonly uint FramesInFlight = 1;
 
@@ -65,42 +65,50 @@ public static unsafe partial class Program
 		surface = window.VkSurface!.Create<AllocationCallbacks>(instance.ToHandle(), null).ToSurface();
 
 		{
-			uint deviceCount;
-			vk.EnumeratePhysicalDevices(instance, &deviceCount, null);
-			if(deviceCount is 0) Throw("No devices found");
-			var physicalDevices = GC.AllocateUninitializedArray<PhysicalDevice>((int)deviceCount);
-			fixed(PhysicalDevice* physicalDevicesPtr = physicalDevices){
-				vk.EnumeratePhysicalDevices(instance, &deviceCount, physicalDevicesPtr);
+			uint physicalDeviceCount;
+			vk.EnumeratePhysicalDevices(instance, &physicalDeviceCount, null);
+			if (physicalDeviceCount is 0) Throw("No devices found");
+			var physicalDevices = GC.AllocateUninitializedArray<PhysicalDevice>((int)physicalDeviceCount);
+			fixed (PhysicalDevice* physicalDevicesPtr = physicalDevices)
+			{
+				vk.EnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevicesPtr);
 			}
-			
-			foreach(var physicalDevice in physicalDevices){
+
+			foreach (var physicalDevice in physicalDevices)
+			{
 				uint queueFamilyCount;
 				vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, null);
-				if(queueFamilyCount is 0) continue;
+				if (queueFamilyCount is 0) continue;
 				var queueFamilyProperties = GC.AllocateUninitializedArray<QueueFamilyProperties>((int)queueFamilyCount);
-				fixed(QueueFamilyProperties* queueFamilyPropertiesPtr = queueFamilyProperties){
+				fixed (QueueFamilyProperties* queueFamilyPropertiesPtr = queueFamilyProperties)
+				{
 					vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyPropertiesPtr);
 				}
-				for(uint i = 0; i< queueFamilyCount; i++){
+				for (uint i = 0; i < queueFamilyCount; i++)
+				{
 					QueueFamilyProperties iQueueFamilyProperties = queueFamilyProperties[i];
-					if(iQueueFamilyProperties.QueueFlags.HasFlag(QueueFlags.QueueGraphicsBit)) if(graphicsFamily is uint.MaxValue) graphicsFamily = i;
-					if(iQueueFamilyProperties.QueueFlags.HasFlag(QueueFlags.QueueComputeBit)) if(computeFamily is uint.MaxValue) computeFamily = i;
-					if(presentFamily is uint.MaxValue){
+					if (iQueueFamilyProperties.QueueFlags.HasFlag(QueueFlags.QueueGraphicsBit)) if (graphicsQueueFamily is uint.MaxValue) graphicsQueueFamily = i;
+					if (iQueueFamilyProperties.QueueFlags.HasFlag(QueueFlags.QueueComputeBit)) if (computeQueueFamily is uint.MaxValue) computeQueueFamily = i;
+					if (presentQueueFamily is uint.MaxValue)
+					{
 						Bool32 supported;
 						khrSurface.GetPhysicalDeviceSurfaceSupport(physicalDevice, i, surface, &supported);
-						if(supported.Value is 1) presentFamily = i;
+						if (supported.Value is 1) presentQueueFamily = i;
 					}
-					if(graphicsFamily is not uint.MaxValue && computeFamily is not uint.MaxValue && presentFamily is not uint.MaxValue) break;
+					if (graphicsQueueFamily is not uint.MaxValue && computeQueueFamily is not uint.MaxValue && presentQueueFamily is not uint.MaxValue) break;
 				}
-				if(graphicsFamily is not uint.MaxValue && computeFamily is not uint.MaxValue && presentFamily is not uint.MaxValue){
+				if (graphicsQueueFamily is not uint.MaxValue && computeQueueFamily is not uint.MaxValue && presentQueueFamily is not uint.MaxValue)
+				{
 					Program.physicalDevice = physicalDevice;
 				}
-				else{
-					graphicsFamily = computeFamily = presentFamily = uint.MaxValue;
+				else
+				{
+					graphicsQueueFamily = computeQueueFamily = presentQueueFamily = uint.MaxValue;
+					continue;
 				}
 				// TODO: other checks besides queue families
 			}
-			if(graphicsFamily is uint.MaxValue || computeFamily is uint.MaxValue || presentFamily is uint.MaxValue) Throw("No device with [ Graphics, Compute, Present ] queue families");
+			if (physicalDevice.Handle is 0) Throw("No matching device found");
 		}
 	}
 	public static void Main()
