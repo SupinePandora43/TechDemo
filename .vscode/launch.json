@@ -10,7 +10,10 @@
             "args": [],
             "cwd": "${workspaceFolder}/src/TechDemo/bin/Debug/net6.0",
             "console": "internalConsole",
-            "stopAtEntry": false
+            "stopAtEntry": false,
+            "env": {
+                "DISPLAY" :":0.0"
+            }
         },
         {
             "name": ".NET Core Attach",
