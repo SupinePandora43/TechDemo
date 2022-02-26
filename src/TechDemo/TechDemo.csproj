@@ -10,6 +10,7 @@
 
 	<ItemGroup>
 		<Shaders Include="./shaders/*.*"/>
+		<EmbeddedResource Include="./shaders/compiled/*.spv" />
 
 		<ProjectReference Include="../AbstractVulkan/AbstractVulkan.csproj" />
 		<ProjectReference Include="../vma/VMASharp/VMASharp.csproj" />
@@ -20,7 +21,6 @@
 	<Target Name="CompileShaders" Inputs="@(Shaders)" Outputs="./shaders/compiled/**" BeforeTargets="ResolveReferences">
 		<MakeDir Directories="./shaders/compiled" />
 		<Exec Command="glslc -O -g -o ./shaders/compiled/%(Shaders.Filename)%(Shaders.Extension).spv %(Shaders.Identity)" EchoOff="false" />
-		<EmbeddedResource Include="./shaders/compiled/%(Shaders.Filename)%(Shaders.Extension).spv" />
 	</Target>
 
 </Project>

@@ -19,8 +19,9 @@ public static unsafe partial class Program
 	private static readonly SurfaceKHR surface;
 	private static readonly PhysicalDevice physicalDevice;
 	private static readonly uint graphicsQueueFamily = uint.MaxValue, computeQueueFamily = uint.MaxValue, presentQueueFamily = uint.MaxValue;
+	private static readonly Device device;
 
-	private static readonly uint FramesInFlight = 1;
+	private static readonly uint FramesInFlight;
 
 	static Program()
 	{
@@ -60,55 +61,131 @@ public static unsafe partial class Program
 			: vk.CreateInstance("TechDemo", new Version32(1, 0, 0), "No Engine", new Version32(0, 0, 0), Vk.Version11, null, Array.Empty<string>(), extensions, null, out instance)
 			);
 
+		// vk.CurrentInstance = instance; // handled by vk.CreateInstance
+
 		if (!vk.TryGetInstanceExtension<KhrSurface>(instance, out khrSurface)) Throw("No KHR_surface");
 
 		surface = window.VkSurface!.Create<AllocationCallbacks>(instance.ToHandle(), null).ToSurface();
 
 		{
 			uint physicalDeviceCount;
-			vk.EnumeratePhysicalDevices(instance, &physicalDeviceCount, null);
+			C(vk.EnumeratePhysicalDevices(instance, &physicalDeviceCount, null));
 			if (physicalDeviceCount is 0) Throw("No devices found");
-			var physicalDevices = GC.AllocateUninitializedArray<PhysicalDevice>((int)physicalDeviceCount);
-			fixed (PhysicalDevice* physicalDevicesPtr = physicalDevices)
-			{
-				vk.EnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevicesPtr);
-			}
+			var physicalDevices = (PhysicalDevice*)NativeMemory.Alloc((nuint)sizeof(PhysicalDevice) * physicalDeviceCount);
+			C(vk.EnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices));
 
-			foreach (var physicalDevice in physicalDevices)
+			for (uint pdi = 0; pdi < physicalDeviceCount; pdi++)
 			{
-				uint queueFamilyCount;
-				vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, null);
-				if (queueFamilyCount is 0) continue;
-				var queueFamilyProperties = GC.AllocateUninitializedArray<QueueFamilyProperties>((int)queueFamilyCount);
-				fixed (QueueFamilyProperties* queueFamilyPropertiesPtr = queueFamilyProperties)
+				var physicalDevice = physicalDevices[pdi];
+
+				bool queues = false;
+				bool extensionsCheck = false;
+
 				{
-					vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyPropertiesPtr);
-				}
-				for (uint i = 0; i < queueFamilyCount; i++)
-				{
-					QueueFamilyProperties iQueueFamilyProperties = queueFamilyProperties[i];
-					if (iQueueFamilyProperties.QueueFlags.HasFlag(QueueFlags.QueueGraphicsBit)) if (graphicsQueueFamily is uint.MaxValue) graphicsQueueFamily = i;
-					if (iQueueFamilyProperties.QueueFlags.HasFlag(QueueFlags.QueueComputeBit)) if (computeQueueFamily is uint.MaxValue) computeQueueFamily = i;
-					if (presentQueueFamily is uint.MaxValue)
+					uint queueFamilyCount;
+					vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, null);
+					if (queueFamilyCount is 0) continue;
+					var queueFamilyProperties = (QueueFamilyProperties*)NativeMemory.Alloc((nuint)sizeof(QueueFamilyProperties) * queueFamilyCount);
+					vk.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties);
+					for (uint i = 0; i < queueFamilyCount; i++)
 					{
-						Bool32 supported;
-						khrSurface.GetPhysicalDeviceSurfaceSupport(physicalDevice, i, surface, &supported);
-						if (supported.Value is 1) presentQueueFamily = i;
+						QueueFamilyProperties iQueueFamilyProperties = queueFamilyProperties[i];
+						if (iQueueFamilyProperties.QueueFlags.HasFlag(QueueFlags.QueueGraphicsBit)) if (graphicsQueueFamily is uint.MaxValue) graphicsQueueFamily = i;
+						if (iQueueFamilyProperties.QueueFlags.HasFlag(QueueFlags.QueueComputeBit)) if (computeQueueFamily is uint.MaxValue) computeQueueFamily = i;
+						if (presentQueueFamily is uint.MaxValue)
+						{
+							Bool32 supported;
+							khrSurface.GetPhysicalDeviceSurfaceSupport(physicalDevice, i, surface, &supported);
+							if (supported.Value is 1) presentQueueFamily = i;
+						}
+						if (graphicsQueueFamily is not uint.MaxValue && computeQueueFamily is not uint.MaxValue && presentQueueFamily is not uint.MaxValue) break;
 					}
-					if (graphicsQueueFamily is not uint.MaxValue && computeQueueFamily is not uint.MaxValue && presentQueueFamily is not uint.MaxValue) break;
-				}
-				if (graphicsQueueFamily is not uint.MaxValue && computeQueueFamily is not uint.MaxValue && presentQueueFamily is not uint.MaxValue)
-				{
-					Program.physicalDevice = physicalDevice;
-				}
-				else
-				{
-					graphicsQueueFamily = computeQueueFamily = presentQueueFamily = uint.MaxValue;
-					continue;
+					NativeMemory.Free(queueFamilyProperties);
+					if (graphicsQueueFamily is not uint.MaxValue && computeQueueFamily is not uint.MaxValue && presentQueueFamily is not uint.MaxValue)
+					{
+						queues = true;
+					}
+					else
+					{
+						graphicsQueueFamily = computeQueueFamily = presentQueueFamily = uint.MaxValue;
+					}
 				}
 				// TODO: other checks besides queue families
+				{
+					uint extensionCount;
+					vk.EnumerateDeviceExtensionProperties(physicalDevice, (byte*)null, &extensionCount, null);
+					if (extensionCount is 0) break;
+					var extensions = (ExtensionProperties*)NativeMemory.Alloc((nuint)sizeof(ExtensionProperties) * extensionCount);
+					string[] extensionNames = new string[extensionCount];
+					for (uint extensionId = 0; extensionId < extensionCount; extensionId++)
+					{
+						extensionNames[extensionId] = Marshal.PtrToStringAnsi((IntPtr)extensions[extensionId].ExtensionName)!;
+					}
+					NativeMemory.Free(extensions);
+					extensionsCheck = true;
+					foreach (string extension in Program.extensions)
+					{
+						//if (!extensionNames.Contains(extension)) extensionsCheck = false;
+					}
+				}
+
+				if (queues && extensionsCheck) // TODO: other checks
+				{
+					Program.physicalDevice = physicalDevice;
+					break;
+				}
 			}
+			NativeMemory.Free(physicalDevices);
+
 			if (physicalDevice.Handle is 0) Throw("No matching device found");
+		}
+
+		{
+			uint[] queueFamilies = new[] { graphicsQueueFamily, computeQueueFamily, presentQueueFamily }.Distinct().ToArray();
+
+			var queueCreateInfos = (DeviceQueueCreateInfo*)NativeMemory.Alloc((nuint)(sizeof(DeviceQueueCreateInfo) * queueFamilies.Length));
+
+			float priority = 1.0f;
+
+			for (uint i = 0; i < queueFamilies.Length; i++)
+			{
+				queueCreateInfos[i] = new()
+				{
+					SType = StructureType.DeviceQueueCreateInfo,
+					PNext = null,
+					Flags = 0,
+					QueueFamilyIndex = queueFamilies[i],
+					QueueCount = 1,
+					PQueuePriorities = &priority
+				};
+			}
+
+			PhysicalDeviceFeatures features = new();
+
+			DeviceCreateInfo deviceCreateInfo = new()
+			{
+				SType = StructureType.DeviceCreateInfo,
+				Flags = 0,
+				PNext = null,
+				PQueueCreateInfos = queueCreateInfos,
+				QueueCreateInfoCount = (uint)queueFamilies.Length,
+				PEnabledFeatures = &features,
+				EnabledExtensionCount = 0, //(uint)extensions.Count,
+				PpEnabledExtensionNames = null, //(byte**)SilkMarshal.StringArrayToPtr(extensions),
+				EnabledLayerCount = EnableValidation ? 1 : 0,
+				PpEnabledLayerNames = (byte**)SilkMarshal.StringArrayToPtr(new[] { "VK_LAYER_KHRONOS_validation" })
+			};
+
+			Device device;
+
+			C(vk.CreateDevice(physicalDevice, &deviceCreateInfo, null, &device));
+
+			Program.device = device;
+			// vk.CurrentDevice = device; // handled by vk.CreateDevice
+
+			//SilkMarshal.Free((nint)deviceCreateInfo.PpEnabledLayerNames);
+			SilkMarshal.Free((nint)deviceCreateInfo.PpEnabledExtensionNames);
+			NativeMemory.Free(queueCreateInfos);
 		}
 	}
 	public static void Main()
