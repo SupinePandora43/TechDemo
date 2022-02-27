@@ -1,12 +1,22 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.InteropServices;
 using AbstractVulkan;
 using Silk.NET.Core;
 using Silk.NET.Core.Native;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
 using Silk.NET.Windowing;
+using VMASharp;
+using Buffer = Silk.NET.Vulkan.Buffer;
 
 namespace TechDemo;
+
+internal struct Vertex
+{
+	Vector3 VertPosition;
+	Vector2 VertUV;
+}
 
 public static unsafe partial class Program
 {
@@ -25,7 +35,7 @@ public static unsafe partial class Program
 
 	static Program()
 	{
-		window = Window.Create(WindowOptions.DefaultVulkan with
+		/*window = Window.Create(WindowOptions.DefaultVulkan with
 		{
 			FramesPerSecond = 0,
 			UpdatesPerSecond = 0,
@@ -45,16 +55,7 @@ public static unsafe partial class Program
 			for (uint i = 0; i < count; i++) extensions.Add(Marshal.PtrToStringAnsi((nint)windowExtensions[i])!);
 		}
 
-		DebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCreateInfoEXT = new()
-		{
-			SType = StructureType.DebugUtilsMessengerCreateInfoExt,
-			PNext = null,
-			Flags = 0,
-			MessageSeverity = DebugUtilsMessageSeverityFlagsEXT.DebugUtilsMessageSeverityVerboseBitExt | DebugUtilsMessageSeverityFlagsEXT.DebugUtilsMessageSeverityWarningBitExt | DebugUtilsMessageSeverityFlagsEXT.DebugUtilsMessageSeverityErrorBitExt | DebugUtilsMessageSeverityFlagsEXT.DebugUtilsMessageSeverityInfoBitExt,
-			MessageType = DebugUtilsMessageTypeFlagsEXT.DebugUtilsMessageTypeGeneralBitExt | DebugUtilsMessageTypeFlagsEXT.DebugUtilsMessageTypePerformanceBitExt | DebugUtilsMessageTypeFlagsEXT.DebugUtilsMessageTypeValidationBitExt,
-			PUserData = null,
-			PfnUserCallback = (delegate* unmanaged[Cdecl]<DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT, DebugUtilsMessengerCallbackDataEXT*, void*, Bool32>)&DebugCallback
-		};
+		
 
 		C(EnableValidation ?
 			vk.CreateInstance("TechDemo", new Version32(1, 0, 0), "No Engine", new Version32(0, 0, 0), Vk.Version11, null, new[] { "VK_LAYER_KHRONOS_validation" }, extensions, &debugUtilsMessengerCreateInfoEXT, out instance)
@@ -186,10 +187,103 @@ public static unsafe partial class Program
 			//SilkMarshal.Free((nint)deviceCreateInfo.PpEnabledLayerNames);
 			SilkMarshal.Free((nint)deviceCreateInfo.PpEnabledExtensionNames);
 			NativeMemory.Free(queueCreateInfos);
-		}
+		}*/
 	}
-	public static void Main()
+	public static void Main(string[] args)
 	{
+		TechDemoApplication app = new();
+		app.Initialize();
+		app.Run();
+	}
 
+	struct ManagedBuffer
+	{
+		Buffer buff;
+		Allocation allocation;
+	}
+
+	class TechDemoApplication : BaseVulkanApplication
+	{
+		private IWindow window;
+
+		Task uniformLayoutASYNC;
+
+		public DescriptorSetLayout uniformLayout;
+		public DescriptorSetLayout textureLayout;
+
+		public DescriptorSet uniformSet;
+		public DescriptorSet textureSet;
+
+		private Sampler _sampler;
+		private Sampler Sampler
+		{
+			get => _sampler;
+			set
+			{
+				if (_sampler.Handle is not 0) vk.DestroySampler(device, _sampler, null);
+				_sampler = value;
+			}
+		}
+
+		public void Initialize()
+		{
+			/*Task.WaitAll(
+				CreateWindowAsync(WindowOptions.DefaultVulkan).ContinueWith((window) => this.window = window.Result).Continue(SyncSwapchain),
+				Task.Run(CreateLayouts),
+				Task.Run(CreatePipelines)
+			);*/
+
+		}
+
+		public void CreateUniformSetLayout()
+		{
+			DescriptorSetLayoutBinding uniformBinding = new(binding: 0, descriptorType: DescriptorType.UniformBuffer, descriptorCount: 1, stageFlags: ShaderStageFlags.ShaderStageAllGraphics);
+			DescriptorSetLayoutCreateInfo uniformLayoutCI = new(bindingCount: 1, pBindings: &uniformBinding);
+			vk.CreateDescriptorSetLayout(device, uniformLayoutCI, null, out uniformLayout);
+		}
+		public void CreateTextureSetLayout()
+		{
+			DescriptorSetLayoutBinding textureBinding = new(binding: 0, descriptorType: DescriptorType.CombinedImageSampler, descriptorCount: 1, stageFlags: ShaderStageFlags.ShaderStageFragmentBit);
+			DescriptorSetLayoutCreateInfo textureLayoutCI = new(bindingCount: 1, pBindings: &textureBinding);
+			vk.CreateDescriptorSetLayout(device, textureLayoutCI, null, out textureLayout);
+		}
+		public void CreateLayouts() => Task.WaitAll(Task.Run(CreateUniformSetLayout), Task.Run(CreateTextureSetLayout));
+
+		private void CreateSampler()
+		{
+			SamplerCreateInfo samplerInfo = new()
+			{
+				SType = StructureType.SamplerCreateInfo,
+				MagFilter = Filter.Linear,
+				MinFilter = Filter.Linear,
+				AddressModeU = SamplerAddressMode.ClampToEdge,
+				AddressModeV = SamplerAddressMode.ClampToEdge,
+				AddressModeW = SamplerAddressMode.Repeat,
+				AnisotropyEnable = false,
+				MaxAnisotropy = 1,
+				BorderColor = BorderColor.IntOpaqueBlack,
+				UnnormalizedCoordinates = false,
+				CompareEnable = false,
+				CompareOp = CompareOp.Never,
+				MipmapMode = SamplerMipmapMode.Linear,
+				MinLod = 0,
+				MaxLod = 1,
+				MipLodBias = 0,
+			};
+			C(vk.CreateSampler(device, samplerInfo, null, out _sampler));
+		}
+
+		public void CreatePipelines()
+		{
+			
+		}
+		public void SyncSwapchain()
+		{
+
+		}
+		public void Run()
+		{
+
+		}
 	}
 }

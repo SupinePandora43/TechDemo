@@ -6,8 +6,8 @@ layout(set = 0, binding = 0) uniform UBO {
 } ubo;
 
 layout(location = 0) in vec3 VertPosition;
-
 layout(location = 1) in vec2 VertUV;
+
 layout(location = 0) out vec2 FragUV;
 
 void main(){
