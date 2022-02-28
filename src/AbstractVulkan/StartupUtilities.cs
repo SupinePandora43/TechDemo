@@ -47,4 +47,5 @@ public static unsafe class StartupUtilities
 	{
 		return vk.CreateInstance(applicationName, applicationVersion, engineName, engineVersion, apiVersion, allocator, layers, extensions, Unsafe.AsPointer(ref next), out instance);
 	}
+
 }

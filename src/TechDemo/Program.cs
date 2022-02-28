@@ -204,7 +204,9 @@ public static unsafe partial class Program
 
 	class TechDemoApplication : BaseVulkanApplication
 	{
+		private SampleCountFlags sampleCount;
 		private IWindow window;
+		private SwapchainKHR swapchain;
 
 		Task uniformLayoutASYNC;
 
@@ -225,6 +227,18 @@ public static unsafe partial class Program
 			}
 		}
 
+		private Format swapchainImageFormat;
+		private RenderPass renderPass;
+
+		public TechDemoApplication() : base(){
+			PhysicalDeviceProperties physicalDeviceProperties;
+			vk.GetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
+
+			sampleCount = (physicalDeviceProperties.Limits.FramebufferColorSampleCounts & physicalDeviceProperties.Limits.FramebufferDepthSampleCounts).GetMaximumSamples();
+		
+		
+		}
+
 		public void Initialize()
 		{
 			/*Task.WaitAll(
@@ -232,7 +246,7 @@ public static unsafe partial class Program
 				Task.Run(CreateLayouts),
 				Task.Run(CreatePipelines)
 			);*/
-
+			
 		}
 
 		public void CreateUniformSetLayout()
@@ -259,23 +273,75 @@ public static unsafe partial class Program
 				AddressModeU = SamplerAddressMode.ClampToEdge,
 				AddressModeV = SamplerAddressMode.ClampToEdge,
 				AddressModeW = SamplerAddressMode.Repeat,
-				AnisotropyEnable = false,
-				MaxAnisotropy = 1,
+				AnisotropyEnable = true,
+				MaxAnisotropy = 4,
 				BorderColor = BorderColor.IntOpaqueBlack,
 				UnnormalizedCoordinates = false,
 				CompareEnable = false,
 				CompareOp = CompareOp.Never,
 				MipmapMode = SamplerMipmapMode.Linear,
 				MinLod = 0,
-				MaxLod = 1,
+				MaxLod = 10,
 				MipLodBias = 0,
 			};
 			C(vk.CreateSampler(device, samplerInfo, null, out _sampler));
 		}
 
+		private void CreateRenderPass()
+		{
+			// Make MSAA optional
+			AttachmentDescription colorAttachmentDescription = new(
+				format: swapchainImageFormat,
+				samples: sampleCount,
+				loadOp: AttachmentLoadOp.Clear,
+				storeOp: AttachmentStoreOp.Store,
+				stencilLoadOp: AttachmentLoadOp.DontCare,
+				stencilStoreOp: AttachmentStoreOp.DontCare,
+				initialLayout: ImageLayout.Undefined, // TODO: should it be?
+				finalLayout: ImageLayout.ColorAttachmentOptimal
+			);
+			AttachmentDescription resolveAttachmentDescription = colorAttachmentDescription with
+			{
+				Samples = SampleCountFlags.SampleCount1Bit,
+				FinalLayout = ImageLayout.PresentSrcKhr
+			};
+			AttachmentDescription depthAttachmentDescription = new(
+				format: Format.R8Srgb,
+				samples: sampleCount,
+				loadOp: AttachmentLoadOp.Clear,
+				storeOp: AttachmentStoreOp.Store,
+				stencilLoadOp: AttachmentLoadOp.DontCare,
+				stencilStoreOp: AttachmentStoreOp.DontCare,
+				initialLayout: ImageLayout.Undefined, // TODO: should it be?
+				finalLayout: ImageLayout.DepthStencilAttachmentOptimal
+			);
+
+			AttachmentReference colorAttachmentReference = new(0, ImageLayout.ColorAttachmentOptimal);
+			AttachmentReference resolveAttachmentReference = new(1, ImageLayout.PresentSrcKhr);
+			AttachmentReference depthAttachmentReference = new(2, ImageLayout.DepthStencilAttachmentOptimal);
+
+			SubpassDescription subpassDescription = new(pipelineBindPoint: PipelineBindPoint.Graphics, colorAttachmentCount: 1, pColorAttachments: &colorAttachmentReference, pResolveAttachments: &resolveAttachmentReference, pDepthStencilAttachment: &depthAttachmentReference);
+
+			SubpassDependency subpassDependency = new()
+			{
+				SrcSubpass = Vk.SubpassExternal,
+				DstSubpass = 0,
+				SrcStageMask = PipelineStageFlags.PipelineStageBottomOfPipeBit,
+				DstStageMask = PipelineStageFlags.PipelineStageColorAttachmentOutputBit,
+				SrcAccessMask = 0,
+				DstAccessMask = AccessFlags.AccessColorAttachmentWriteBit | AccessFlags.AccessDepthStencilAttachmentWriteBit
+			};
+
+			AttachmentDescription* attachmentDescriptions = stackalloc[] { colorAttachmentDescription, resolveAttachmentDescription, depthAttachmentDescription };
+
+			RenderPassCreateInfo renderPassCI = new(attachmentCount: 3, pAttachments: attachmentDescriptions, subpassCount: 1, pSubpasses: &subpassDescription, dependencyCount: 1, pDependencies: &subpassDependency);
+
+			C(vk.CreateRenderPass(device, &renderPassCI, null, out renderPass));
+		}
+
 		public void CreatePipelines()
 		{
-			
+
 		}
 		public void SyncSwapchain()
 		{
