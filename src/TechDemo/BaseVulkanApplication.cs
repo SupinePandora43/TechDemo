@@ -15,7 +15,7 @@ public unsafe class BaseVulkanApplication
 {
 	public readonly Vk vk;
 	public readonly Instance instance;
-	public readonly KhrSurface khrSurface;
+	public readonly KhrSurface khrSurface; // TODO: make optional?
 	public readonly PhysicalDevice physicalDevice;
 	public readonly Device device;
 
