@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using AbstractVulkan;
 using Silk.NET.Core;
@@ -204,7 +205,7 @@ public static unsafe partial class Program
 	class TechDemoApplication : BaseVulkanApplication
 	{
 		private readonly SampleCountFlags sampleCount;
-		private readonly Format depthImageFormat;
+		private readonly Format depthImageFormat = Format.D32Sfloat;
 
 		Task uniformLayoutASYNC;
 
@@ -217,6 +218,16 @@ public static unsafe partial class Program
 		private readonly KhrSwapchain khrSwapchain;
 		private readonly IWindow window;
 		private readonly SurfaceKHR surface;
+		private SurfaceCapabilitiesKHR SurfaceCapabilities
+		{
+			get
+			{
+				SurfaceCapabilitiesKHR surfaceCapabilities;
+				khrSurface.GetPhysicalDeviceSurfaceCapabilities(physicalDevice, surface, &surfaceCapabilities);
+				return surfaceCapabilities;
+			}
+		}
+		private readonly SurfaceFormatKHR surfaceFormat;
 		private readonly SwapchainKHR swapchain;
 		private readonly Format swapchainImageFormat;
 		private readonly RenderPass renderPass;
@@ -230,9 +241,6 @@ public static unsafe partial class Program
 
 			FormatProperties formatProperties;
 			vk.GetPhysicalDeviceFormatProperties(physicalDevice, Format.D32Sfloat, &formatProperties);
-			depthImageFormat = Format.D32Sfloat;
-
-			swapchainImageFormat = Format.R8G8B8A8Srgb;
 
 			window = CreateWindow(WindowOptions.DefaultVulkan);
 
@@ -240,7 +248,41 @@ public static unsafe partial class Program
 
 			vk.TryGetDeviceExtension(instance, device, out khrSwapchain);
 
-			Pipeline.Handle.ToString();
+			{
+				uint surfaceFormatCount;
+				khrSurface.GetPhysicalDeviceSurfaceFormats(physicalDevice, surface, &surfaceFormatCount, null);
+				var surfaceFormats = (SurfaceFormatKHR*)NativeMemory.Alloc((nuint)sizeof(SurfaceFormatKHR) * surfaceFormatCount);
+				khrSurface.GetPhysicalDeviceSurfaceFormats(physicalDevice, surface, &surfaceFormatCount, surfaceFormats);
+				for (uint i = 0; i < surfaceFormatCount; i++)
+					if (surfaceFormats[i].ColorSpace.HasFlag(ColorSpaceKHR.ColorSpaceSrgbNonlinearKhr) && surfaceFormats[i].Format.HasFlag(Format.B8G8R8A8Srgb))
+					{
+						surfaceFormat = new(Format.B8G8R8A8Srgb, ColorSpaceKHR.ColorSpaceSrgbNonlinearKhr);
+						break;
+					}
+				NativeMemory.Free(surfaceFormats);
+			}
+
+			Extent2D GetExtent(SurfaceCapabilitiesKHR surfaceCapabilities)
+			{
+				if (surfaceCapabilities.CurrentExtent.Width is not uint.MaxValue && surfaceCapabilities.CurrentExtent.Height is not uint.MaxValue) return surfaceCapabilities.CurrentExtent;
+				var framebufferSize = window.FramebufferSize;
+				return new(Math.Clamp((uint)framebufferSize.X, surfaceCapabilities.MinImageExtent.Width, surfaceCapabilities.MaxImageExtent.Width), Math.Clamp((uint)framebufferSize.Y, surfaceCapabilities.MinImageExtent.Height, surfaceCapabilities.MaxImageExtent.Height));
+			}
+
+			SwapchainCreateInfoKHR swapchainCI = new(
+				surface: surface,
+				minImageCount: SurfaceCapabilities.MinImageCount,
+				imageFormat: surfaceFormat.Format,
+				imageColorSpace: surfaceFormat.ColorSpace,
+				imageExtent: GetExtent(SurfaceCapabilities),
+				imageArrayLayers: 1,
+				imageUsage: ImageUsageFlags.ImageUsageColorAttachmentBit,
+				preTransform: SurfaceCapabilities.CurrentTransform,
+				compositeAlpha: CompositeAlphaFlagsKHR.CompositeAlphaOpaqueBitKhr,
+				presentMode: PresentModeKHR.PresentModeImmediateKhr // TODO: vsync
+			);
+
+			C(khrSwapchain.CreateSwapchain(device, &swapchainCI, null, out swapchain));
 		}
 
 		#region DescriptorSetLayout
@@ -411,13 +453,16 @@ public static unsafe partial class Program
 		}
 
 		private byte* _main;
-		private byte* Main {
-			get {
-				if(_main is null) _main = (byte*)SilkMarshal.StringToPtr("main");
+		private byte* Main
+		{
+			get
+			{
+				if (_main is null) _main = (byte*)SilkMarshal.StringToPtr("main");
 				return _main;
 			}
-			set {
-				if(_main is not null) SilkMarshal.Free((nint)_main);
+			set
+			{
+				if (_main is not null) SilkMarshal.Free((nint)_main);
 				_main = value;
 			}
 		}
@@ -527,7 +572,7 @@ public static unsafe partial class Program
 					new Span<float>(pipelineColorBlendStateCI.BlendConstants, 4).Fill(1);
 					DynamicState dynamicState = DynamicState.Viewport;
 					PipelineDynamicStateCreateInfo pipelineDynamicStateCI = new(dynamicStateCount: 1, pDynamicStates: &dynamicState);
-					PipelineShaderStageCreateInfo* pipelineShaderStageCIs = stackalloc PipelineShaderStageCreateInfo[]{
+					PipelineShaderStageCreateInfo* pipelineShaderStageCIs = stackalloc PipelineShaderStageCreateInfo[] {
 						new(module: VertexShaderModule, stage: ShaderStageFlags.ShaderStageVertexBit, pName: Main),
 						new(module: FragmentShaderModule, stage: ShaderStageFlags.ShaderStageFragmentBit, pName: Main)
 					};

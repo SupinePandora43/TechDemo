@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using AbstractVulkan;
 using Silk.NET.Core;
+using Silk.NET.Core.Native;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
 using Silk.NET.Windowing;
@@ -98,22 +99,34 @@ public unsafe class BaseVulkanApplication
 
 				PhysicalDeviceFeatures features = new(samplerAnisotropy: true);
 
+				uint extensionCount; // TODO: only required ones
+				vk.EnumerateDeviceExtensionProperties(physicalDevice, (byte*)null, &extensionCount, null);
+				var deviceExtensions = (ExtensionProperties*)NativeMemory.Alloc((nuint)sizeof(ExtensionProperties) * extensionCount);
+				vk.EnumerateDeviceExtensionProperties(physicalDevice, (byte*)null, &extensionCount, deviceExtensions);
+				var extensionNames = (byte**)NativeMemory.Alloc((nuint)sizeof(byte*) * extensionCount);
+				for (uint i = 0; i < extensionCount; i++)
+				{
+					extensionNames[i] = deviceExtensions[i].ExtensionName;
+				}
 				DeviceCreateInfo deviceCreateInfo = new()
 				{
 					SType = StructureType.DeviceCreateInfo,
 					PQueueCreateInfos = queueCreateInfos,
 					QueueCreateInfoCount = (uint)queueFamilies.Length,
 					PEnabledFeatures = &features,
-					// EnabledExtensionCount = 0, //(uint)extensions.Count,
-					//PpEnabledExtensionNames = null, //(byte**)SilkMarshal.StringArrayToPtr(extensions),
-					// EnabledLayerCount = EnableValidation ? 1 : 0,
-					// PpEnabledLayerNames = (byte**)SilkMarshal.StringArrayToPtr(new[] { "VK_LAYER_KHRONOS_validation" })
+					EnabledExtensionCount = extensionCount,
+					PpEnabledExtensionNames = extensionNames,
+					EnabledLayerCount = validation ? 1u : 0u,
+					PpEnabledLayerNames = (byte**)SilkMarshal.StringArrayToPtr(new[] { "VK_LAYER_KHRONOS_validation" })
 				};
 
 				Device device;
 
 				C(vk.CreateDevice(physicalDevice, &deviceCreateInfo, null, &device));
+				NativeMemory.Free(extensionNames);
+				NativeMemory.Free(deviceExtensions);
 				NativeMemory.Free(queueCreateInfos);
+				SilkMarshal.Free((nint)deviceCreateInfo.PpEnabledLayerNames);
 
 				this.device = device;
 
@@ -125,9 +138,6 @@ public unsafe class BaseVulkanApplication
 					queuesList.Add(q);
 				}
 				queues = queuesList.AsReadOnly();
-
-				//SilkMarshal.Free((nint)deviceCreateInfo.PpEnabledLayerNames);
-				//SilkMarshal.Free((nint)deviceCreateInfo.PpEnabledExtensionNames);
 			}
 		}
 
