@@ -154,14 +154,7 @@ public unsafe class BaseVulkanApplication
 
 	public IWindow CreateWindow(WindowOptions options)
 	{
-		var window = Window.Create(WindowOptions.DefaultVulkan with
-		{
-			FramesPerSecond = 0,
-			UpdatesPerSecond = 0,
-			VSync = false,
-			IsEventDriven = false,
-			Title = "TechDemo",
-		});
+		var window = Window.Create(options);
 		window.Initialize();
 		if (window.VkSurface is null) throw new PlatformNotSupportedException("window.VkSurface is null");
 		return window;
