@@ -63,6 +63,8 @@ public unsafe class BaseVulkanApplication
 
 		if (!vk.TryGetInstanceExtension(instance, out khrSurface)) Throw("Failed to aquire KhrSurface from instance");
 
+		bool VK_EXT_memory_budget = false;
+
 		{
 			uint physicalDeviceCount;
 			C(vk.EnumeratePhysicalDevices(instance, &physicalDeviceCount, null));
@@ -107,6 +109,7 @@ public unsafe class BaseVulkanApplication
 				for (uint i = 0; i < extensionCount; i++)
 				{
 					extensionNames[i] = deviceExtensions[i].ExtensionName;
+					if (new string((sbyte*)extensionNames[i]) is "VK_EXT_memory_budget") VK_EXT_memory_budget = true;
 				}
 				DeviceCreateInfo deviceCreateInfo = new()
 				{
@@ -148,7 +151,8 @@ public unsafe class BaseVulkanApplication
 			VulkanAPIVersion = Vk.Version11,
 			Instance = instance,
 			PhysicalDevice = physicalDevice,
-			LogicalDevice = device
+			LogicalDevice = device,
+			Flags = (VK_EXT_memory_budget ? AllocatorCreateFlags.ExtMemoryBudget : 0)
 		});
 	}
 
