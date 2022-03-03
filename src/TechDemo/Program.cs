@@ -15,8 +15,9 @@ namespace TechDemo;
 
 internal struct Vertex
 {
-	Vector3 VertPosition;
-	Vector2 VertUV;
+	public Vector3 VertPosition;
+	public Vector2 VertUV;
+	private unsafe fixed float alignment[3];
 }
 
 public static unsafe partial class Program
@@ -229,8 +230,12 @@ public static unsafe partial class Program
 		}
 		private readonly SurfaceFormatKHR surfaceFormat;
 		private readonly SwapchainKHR swapchain;
-		private readonly Format swapchainImageFormat;
 		private readonly RenderPass renderPass;
+
+		private readonly uint graphicsQueueIndices;
+		private readonly Queue graphicsQueue;
+
+		private readonly (Buffer, Allocation) VertexBuffer;
 
 		public TechDemoApplication() : base()
 		{
@@ -283,6 +288,67 @@ public static unsafe partial class Program
 			);
 
 			C(khrSwapchain.CreateSwapchain(device, &swapchainCI, null, out swapchain));
+
+			graphicsQueueIndices = 0; // TODO: actual handling
+			graphicsQueue = queues[0]; // TODO: actual handling
+			fixed (uint* graphicsQueueIndicesPTR = &graphicsQueueIndices)
+			{
+				Buffer staging = allocator.CreateBuffer(new(
+					size: ((ulong)sizeof(Vertex) * 8),
+					usage: BufferUsageFlags.BufferUsageTransferSrcBit,
+					sharingMode: SharingMode.Exclusive,
+					queueFamilyIndexCount: 1,
+					pQueueFamilyIndices: graphicsQueueIndicesPTR), new(
+					usage: MemoryUsage.CPU_Only,
+					requiredFlags: MemoryPropertyFlags.MemoryPropertyHostVisibleBit | MemoryPropertyFlags.MemoryPropertyHostCoherentBit
+				), out Allocation stagingAllocation);
+
+				Vertex* mapped = (Vertex*)stagingAllocation.Map();
+
+				mapped[0] = new()
+				{
+					VertPosition = new(-1, -1, -1),
+					VertUV = new(0, 1)
+				};
+				mapped[1] = new()
+				{
+					VertPosition = new(1, -1, -1),
+					VertUV = new(1, 1)
+				};
+				mapped[2] = new()
+				{
+					VertPosition = new(1, 1, -1),
+					VertUV = new(1, 0)
+				};
+				mapped[3] = new()
+				{
+					VertPosition = new(1, 1, -1),
+					VertUV = new(0, 0)
+				};
+				for (byte i = 4; i < 8; i++) { mapped[i] = mapped[i - 4]; mapped[i].VertPosition.Z = 1; }
+
+				stagingAllocation.Unmap();
+
+				Buffer vb = allocator.CreateBuffer(new(
+					size: ((ulong)sizeof(Vertex) * 8),
+					usage: BufferUsageFlags.BufferUsageTransferSrcBit,
+					sharingMode: SharingMode.Exclusive,
+					queueFamilyIndexCount: 1,
+					pQueueFamilyIndices: graphicsQueueIndicesPTR), new(
+					usage: MemoryUsage.GPU_Only,
+					requiredFlags: MemoryPropertyFlags.MemoryPropertyDeviceLocalBit
+				), out Allocation allocation);
+
+				BeginSingleTimeCommands();
+				BufferCopy region = new(size: (ulong)sizeof(Vertex) * 8);
+				vk.CmdCopyBuffer(singleTimeCommandBuffer, staging, vb, 1, &region);
+				EndSingleTimeCommands();
+
+				vk.DestroyBuffer(device, staging, null);
+				allocator.FreeMemory(stagingAllocation);
+
+				VertexBuffer = (vb, allocation);
+			}
 		}
 
 		#region DescriptorSetLayout
@@ -373,7 +439,7 @@ public static unsafe partial class Program
 				{
 					// TODO: Optional MSAA
 					AttachmentDescription colorAttachmentDescription = new(
-						format: swapchainImageFormat,
+						format: surfaceFormat.Format,
 						samples: sampleCount,
 						loadOp: AttachmentLoadOp.Clear,
 						storeOp: AttachmentStoreOp.Store,
@@ -441,7 +507,7 @@ public static unsafe partial class Program
 						setLayoutCount: 2,
 						pSetLayouts: descriptorSetLayouts
 					);
-					vk.CreatePipelineLayout(device, &pipelineLayoutCI, null, out _pipelineLayout);
+					C(vk.CreatePipelineLayout(device, &pipelineLayoutCI, null, out _pipelineLayout));
 				}
 				return _pipelineLayout;
 			}
@@ -600,6 +666,47 @@ public static unsafe partial class Program
 				if (_pipeline.Handle is not 0) vk.DestroyPipeline(device, _pipeline, null);
 				_pipeline = value;
 			}
+		}
+
+		private CommandPool _commandPool;
+		private CommandPool CommandPool
+		{
+			get
+			{
+				if (_commandPool.Handle is 0)
+				{
+					CommandPoolCreateInfo commandPoolCI = new(queueFamilyIndex: graphicsQueueIndices);
+					C(vk.CreateCommandPool(device, &commandPoolCI, null, out _commandPool));
+				}
+				return _commandPool;
+			}
+			set
+			{
+				if (_commandPool.Handle is not 0) vk.DestroyCommandPool(device, _commandPool, null);
+				_commandPool = value;
+			}
+		}
+
+		private CommandBuffer singleTimeCommandBuffer;
+
+		private void BeginSingleTimeCommands()
+		{
+			CommandBufferBeginInfo commandBufferBeginInfo = new();
+			C(vk.BeginCommandBuffer(singleTimeCommandBuffer, &commandBufferBeginInfo));
+		}
+		private void EndSingleTimeCommands()
+		{
+			vk.EndCommandBuffer(singleTimeCommandBuffer);
+			FenceCreateInfo fenceCI = new();
+			Fence fence;
+			C(vk.CreateFence(device, &fenceCI, null, &fence));
+			fixed (CommandBuffer* commandBuffer = &singleTimeCommandBuffer)
+			{
+				SubmitInfo submitInfo = new(commandBufferCount: 1, pCommandBuffers: commandBuffer);
+				C(vk.QueueSubmit(graphicsQueue, 1, &submitInfo, fence));
+			}
+			C(vk.WaitForFences(device, 1, &fence, Vk.True, 0));
+			vk.DestroyFence(device, fence, null);
 		}
 
 		public void CreatePipelines()
