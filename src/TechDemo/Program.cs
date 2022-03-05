@@ -783,6 +783,8 @@ public static unsafe partial class Program
 			BufferImageCopy bufferImageCopy = new(bufferRowLength: width * 4, bufferImageHeight: height, imageSubresource: new ImageSubresourceLayers(ImageAspectFlags.ImageAspectColorBit, 0, 0, 1), imageExtent: new(width, height, 1));
 			vk.CmdCopyBufferToImage(SingleTimeCommandBuffer, stagingBuffer, image, ImageLayout.TransferDstOptimal, 1, &bufferImageCopy);
 			EndSingleTimeCommands();
+			vk.DestroyBuffer(device, stagingBuffer, null);
+			allocator.FreeMemory(stagingAllocation);
 		}
 
 		public void CreatePipelines()
