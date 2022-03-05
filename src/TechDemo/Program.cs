@@ -746,7 +746,7 @@ public static unsafe partial class Program
 			Fence SingleTimeFenceLOCAL = SingleTimeFence;
 			SubmitInfo submitInfo = new(commandBufferCount: 1, pCommandBuffers: &SingleTimeCommandBufferLOCAL);
 			C(vk.QueueSubmit(graphicsQueue, 1, &submitInfo, SingleTimeFenceLOCAL));
-			C(vk.WaitForFences(device, 1, SingleTimeFenceLOCAL, Vk.True, 0));
+			C(vk.WaitForFences(device, 1, SingleTimeFenceLOCAL, Vk.True, ulong.MaxValue));
 			vk.ResetFences(device, 1, &SingleTimeFenceLOCAL);
 		}
 
@@ -770,10 +770,10 @@ public static unsafe partial class Program
 				imageType: ImageType.ImageType2D,
 				format: Format.B8G8R8A8Srgb,
 				extent: new(width, height),
-				mipLevels: (uint)MathF.Ceiling(MathF.Log2(MathF.Max(width, height))),
+				mipLevels: (uint)MathF.Floor(MathF.Log2(MathF.Max(width, height))),
 				arrayLayers: 1,
 				samples: SampleCountFlags.SampleCount1Bit,
-				usage: ImageUsageFlags.ImageUsageTransferDstBit | ImageUsageFlags.ImageUsageSampledBit,
+				usage: ImageUsageFlags.ImageUsageTransferDstBit | ImageUsageFlags.ImageUsageTransferSrcBit | ImageUsageFlags.ImageUsageSampledBit,
 				queueFamilyIndexCount: 1,
 				pQueueFamilyIndices: GraphicsQueueIndices
 			);
@@ -781,7 +781,62 @@ public static unsafe partial class Program
 
 			BeginSingleTimeCommands();
 			BufferImageCopy bufferImageCopy = new(bufferRowLength: width * 4, bufferImageHeight: height, imageSubresource: new ImageSubresourceLayers(ImageAspectFlags.ImageAspectColorBit, 0, 0, 1), imageExtent: new(width, height, 1));
-			vk.CmdCopyBufferToImage(SingleTimeCommandBuffer, stagingBuffer, image, ImageLayout.TransferDstOptimal, 1, &bufferImageCopy);
+			vk.CmdCopyBufferToImage(SingleTimeCommandBuffer, stagingBuffer, image, ImageLayout.TransferSrcOptimal, 1, &bufferImageCopy);
+			{
+				ImageMemoryBarrier imageMemoryBarrier = new(
+					srcAccessMask: AccessFlags.AccessTransferWriteBit,
+					dstAccessMask: AccessFlags.AccessTransferReadBit,
+					oldLayout: ImageLayout.TransferSrcOptimal,
+					newLayout: ImageLayout.TransferSrcOptimal,
+					srcQueueFamilyIndex: graphicsQueueIndices,
+					dstQueueFamilyIndex: graphicsQueueIndices,
+					image: image,
+					subresourceRange: new(ImageAspectFlags.ImageAspectColorBit, 0, 1, 0, 1)
+				);
+				for (uint mipLevel = 1; mipLevel < imageCI.MipLevels; mipLevel++)
+				{
+					imageMemoryBarrier.SubresourceRange.BaseMipLevel = mipLevel - 1;
+					imageMemoryBarrier.SrcAccessMask = AccessFlags.AccessTransferWriteBit;
+					imageMemoryBarrier.DstAccessMask = AccessFlags.AccessTransferReadBit;
+					vk.CmdPipelineBarrier(SingleTimeCommandBuffer, PipelineStageFlags.PipelineStageTransferBit, PipelineStageFlags.PipelineStageTransferBit, 0, 0, null, 0, null, 1, &imageMemoryBarrier);
+
+					ImageBlit blit = new()
+					{
+						SrcOffsets = {
+							Element0 = new(),
+							Element1 = {
+								Z = 1,
+								X = (int) (2^(imageCI.MipLevels - mipLevel + 1)),
+								Y = (int) (2^(imageCI.MipLevels - mipLevel + 1))
+							}
+						},
+						SrcSubresource = {
+							AspectMask = ImageAspectFlags.ImageAspectColorBit,
+							BaseArrayLayer = 0,
+							LayerCount = 1,
+							MipLevel = mipLevel - 1
+						},
+						DstOffsets = {
+							Element0 = new(),
+							Element1 = {
+								Z = 1,
+								X = (int) (2^(imageCI.MipLevels - mipLevel)),
+								Y = (int) (2^(imageCI.MipLevels - mipLevel))
+							}
+						},
+						DstSubresource = {
+							AspectMask = ImageAspectFlags.ImageAspectColorBit,
+							BaseArrayLayer = 0,
+							LayerCount = 1,
+							MipLevel = mipLevel
+						}
+					};
+					vk.CmdBlitImage(SingleTimeCommandBuffer, image, ImageLayout.TransferSrcOptimal, image, ImageLayout.TransferDstOptimal, 1, &blit, Filter.Linear); // TODO: what about nearest?
+					imageMemoryBarrier.SrcAccessMask = AccessFlags.AccessTransferWriteBit;
+					imageMemoryBarrier.DstAccessMask = AccessFlags.AccessTransferReadBit;
+					vk.CmdPipelineBarrier(SingleTimeCommandBuffer, PipelineStageFlags.PipelineStageTransferBit, PipelineStageFlags.PipelineStageTransferBit, 0, 0, null, 0, null, 1, &imageMemoryBarrier);
+				}
+			}
 			EndSingleTimeCommands();
 			vk.DestroyBuffer(device, stagingBuffer, null);
 			allocator.FreeMemory(stagingAllocation);
