@@ -233,6 +233,15 @@ public static unsafe partial class Program
 		private readonly RenderPass renderPass;
 
 		private readonly uint graphicsQueueIndices;
+		private uint* GraphicsQueueIndices
+		{ // TODO: WTF
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			get
+			{
+				uint graphicsQueueIndicesLOCAL = graphicsQueueIndices;
+				return &graphicsQueueIndicesLOCAL;
+			}
+		}
 		private readonly Queue graphicsQueue;
 
 		private readonly (Buffer, Allocation) VertexBuffer;
@@ -331,7 +340,7 @@ public static unsafe partial class Program
 
 				Buffer vb = allocator.CreateBuffer(new(
 					size: ((ulong)sizeof(Vertex) * 8),
-					usage: BufferUsageFlags.BufferUsageTransferSrcBit,
+					usage: BufferUsageFlags.BufferUsageTransferDstBit | BufferUsageFlags.BufferUsageVertexBufferBit,
 					sharingMode: SharingMode.Exclusive,
 					queueFamilyIndexCount: 1,
 					pQueueFamilyIndices: graphicsQueueIndicesPTR), new(
@@ -341,7 +350,7 @@ public static unsafe partial class Program
 
 				BeginSingleTimeCommands();
 				BufferCopy region = new(size: (ulong)sizeof(Vertex) * 8);
-				vk.CmdCopyBuffer(singleTimeCommandBuffer, staging, vb, 1, &region);
+				vk.CmdCopyBuffer(SingleTimeCommandBuffer, staging, vb, 1, &region);
 				EndSingleTimeCommands();
 
 				vk.DestroyBuffer(device, staging, null);
@@ -687,26 +696,93 @@ public static unsafe partial class Program
 			}
 		}
 
-		private CommandBuffer singleTimeCommandBuffer;
+		private Fence _singleTimeFence = default;
+		private Fence SingleTimeFence
+		{
+			get
+			{
+				if (_singleTimeFence.Handle is 0)
+				{
+					FenceCreateInfo fenceCI = new() { SType = StructureType.FenceCreateInfo };
+					C(vk.CreateFence(device, &fenceCI, null, out _singleTimeFence));
+				}
+				return _singleTimeFence;
+			}
+			set
+			{
+				if (_singleTimeFence.Handle is not 0) vk.DestroyFence(device, _singleTimeFence, null);
+				_singleTimeFence = value;
+			}
+		}
+
+		private CommandBuffer _singleTimeCommandBuffer = default;
+		private CommandBuffer SingleTimeCommandBuffer
+		{
+			get
+			{
+				if (_singleTimeCommandBuffer.Handle is 0)
+				{
+					CommandBufferAllocateInfo commandBufferAllocateInfo = new(commandPool: CommandPool, commandBufferCount: 1);
+					vk.AllocateCommandBuffers(device, &commandBufferAllocateInfo, out _singleTimeCommandBuffer);
+				}
+				return _singleTimeCommandBuffer;
+			}
+			set
+			{
+				if (_singleTimeCommandBuffer.Handle is not 0) vk.FreeCommandBuffers(device, CommandPool, 1, _singleTimeCommandBuffer);
+				_singleTimeCommandBuffer = value;
+			}
+		}
 
 		private void BeginSingleTimeCommands()
 		{
-			CommandBufferBeginInfo commandBufferBeginInfo = new();
-			C(vk.BeginCommandBuffer(singleTimeCommandBuffer, &commandBufferBeginInfo));
+			CommandBufferBeginInfo commandBufferBeginInfo = new() { SType = StructureType.CommandBufferBeginInfo };
+			C(vk.BeginCommandBuffer(SingleTimeCommandBuffer, &commandBufferBeginInfo));
 		}
 		private void EndSingleTimeCommands()
 		{
-			vk.EndCommandBuffer(singleTimeCommandBuffer);
-			FenceCreateInfo fenceCI = new();
-			Fence fence;
-			C(vk.CreateFence(device, &fenceCI, null, &fence));
-			fixed (CommandBuffer* commandBuffer = &singleTimeCommandBuffer)
+			var SingleTimeCommandBufferLOCAL = SingleTimeCommandBuffer;
+			vk.EndCommandBuffer(SingleTimeCommandBufferLOCAL);
+			Fence SingleTimeFenceLOCAL = SingleTimeFence;
+			SubmitInfo submitInfo = new(commandBufferCount: 1, pCommandBuffers: &SingleTimeCommandBufferLOCAL);
+			C(vk.QueueSubmit(graphicsQueue, 1, &submitInfo, SingleTimeFenceLOCAL));
+			C(vk.WaitForFences(device, 1, SingleTimeFenceLOCAL, Vk.True, 0));
+			vk.ResetFences(device, 1, &SingleTimeFenceLOCAL);
+		}
+
+		private void CreateTexture()
+		{
+			uint width = 512;
+			uint height = 512;
+
+			Buffer stagingBuffer = allocator.CreateBuffer(new(size: width * height * 4, usage: BufferUsageFlags.BufferUsageTransferSrcBit, queueFamilyIndexCount: 1, pQueueFamilyIndices: GraphicsQueueIndices), new(usage: MemoryUsage.CPU_To_GPU, requiredFlags: MemoryPropertyFlags.MemoryPropertyHostVisibleBit | MemoryPropertyFlags.MemoryPropertyHostCoherentBit), out Allocation stagingAllocation);
+			byte* mapped = (byte*)stagingAllocation.Map();
+			nuint address = 0;
+			for (nuint pixel = 0; pixel < width * height; pixel++)
 			{
-				SubmitInfo submitInfo = new(commandBufferCount: 1, pCommandBuffers: commandBuffer);
-				C(vk.QueueSubmit(graphicsQueue, 1, &submitInfo, fence));
+				mapped[address] = (byte)(pixel / width * height);
+				mapped[address + 3] = byte.MaxValue;
+				address += 3;
 			}
-			C(vk.WaitForFences(device, 1, &fence, Vk.True, 0));
-			vk.DestroyFence(device, fence, null);
+			stagingAllocation.Unmap();
+
+			ImageCreateInfo imageCI = new(
+				imageType: ImageType.ImageType2D,
+				format: Format.B8G8R8A8Srgb,
+				extent: new(width, height),
+				mipLevels: (uint)MathF.Ceiling(MathF.Log2(MathF.Max(width, height))),
+				arrayLayers: 1,
+				samples: SampleCountFlags.SampleCount1Bit,
+				usage: ImageUsageFlags.ImageUsageTransferDstBit | ImageUsageFlags.ImageUsageSampledBit,
+				queueFamilyIndexCount: 1,
+				pQueueFamilyIndices: GraphicsQueueIndices
+			);
+			Image image = allocator.CreateImage(imageCI, new(usage: MemoryUsage.GPU_Only, requiredFlags: MemoryPropertyFlags.MemoryPropertyDeviceLocalBit), out Allocation textureAllocation);
+
+			BeginSingleTimeCommands();
+			BufferImageCopy bufferImageCopy = new(bufferRowLength: width * 4, bufferImageHeight: height, imageSubresource: new ImageSubresourceLayers(ImageAspectFlags.ImageAspectColorBit, 0, 0, 1), imageExtent: new(width, height, 1));
+			vk.CmdCopyBufferToImage(SingleTimeCommandBuffer, stagingBuffer, image, ImageLayout.TransferDstOptimal, 1, &bufferImageCopy);
+			EndSingleTimeCommands();
 		}
 
 		public void CreatePipelines()
